@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virax Jr. - Agent Interface</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Roboto+Mono&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/tokyo-night-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #1a1b26;
+            --chat-bg: #1f2335;
+            --fg-color: #c0caf5;
+            --border-color: #414868;
+            --accent-color: #7aa2f7; /* Agile Agent */
+            --user-msg-bg: #292e42;
+            --model-msg-bg: #24283b;
+            --input-bg: #16161e;
+            --scroll-thumb-color: var(--accent-color);
+            --scroll-track-color: var(--input-bg);
+            --direct-color: #7dcfff;     /* Direct Dispatch */
+            --architect-color: #bb9af7;  /* Architect Engine */
+            --code-bg: #1e2030; /* Slightly different bg for code block container */
+            --plan-bg: #2a2f45;
+            --plan-border: #545c7e;
+            --current-step-bg: rgba(122, 162, 247, 0.15);
+            --completed-step: #73daca;
+        }
+
+        html, body {
+            height: 100%; margin: 0; overflow: hidden;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--fg-color);
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        .chat-container {
+            width: 100%; max-width: 850px; height: 95vh;
+            background-color: var(--chat-bg);
+            border-radius: 12px; border: 1px solid var(--border-color);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        .chat-header {
+            padding: 1rem; font-family: 'Roboto Mono', monospace;
+            border-bottom: 1px solid var(--border-color);
+            text-align: center; font-size: 1.1rem; font-weight: 700;
+            color: var(--accent-color); flex-shrink: 0;
+        }
+        .chat-header span { opacity: 0.6; font-weight: 400; }
+
+        #chat-history {
+            flex-grow: 1; overflow-y: auto; padding: 1.5rem;
+            display: flex; flex-direction: column; gap: 1.25rem;
+        }
+
+        #chat-history::-webkit-scrollbar { width: 8px; }
+        #chat-history::-webkit-scrollbar-track { background: var(--scroll-track-color); }
+        #chat-history::-webkit-scrollbar-thumb { background-color: var(--scroll-thumb-color); border-radius: 10px; border: 2px solid var(--scroll-track-color); }
+
+        .message {
+            display: flex; align-items: flex-start; gap: 12px; max-width: 90%;
+        }
+
+        .avatar {
+            width: 32px; height: 32px; border-radius: 50%;
+            background-color: var(--border-color);
+            display: flex; justify-content: center; align-items: center;
+            font-weight: 700; font-size: 0.9rem; flex-shrink: 0; margin-top: 5px;
+        }
+
+        .user-message { margin-left: auto; flex-direction: row-reverse; }
+        .user-message .avatar { background-color: #4e5a87; }
+        .model-message .avatar { background-color: var(--accent-color); color: var(--bg-color); }
+
+        .message-content {
+            padding: 12px 18px; border-radius: 12px; line-height: 1.6; width: 100%;
+        }
+
+        .user-message .message-content { background-color: var(--user-msg-bg); border-top-right-radius: 4px;}
+        .model-message .message-content { background-color: var(--model-msg-bg); border-top-left-radius: 4px; }
+
+        .typing-indicator {
+            align-self: flex-start; font-style: italic; opacity: 0.6; padding-left: 50px;
+        }
+
+        .chat-input-area {
+            padding: 1rem; border-top: 1px solid var(--border-color); flex-shrink: 0;
+        }
+
+        #chat-form {
+            display: flex; gap: 10px; background-color: var(--input-bg);
+            border: 1px solid var(--border-color); border-radius: 8px; padding: 5px;
+        }
+
+        #chat-input {
+            flex-grow: 1; background: none; border: none; color: var(--fg-color);
+            padding: 12px; font-size: 1rem; font-family: 'Inter', sans-serif;
+        }
+        #chat-input:focus { outline: none; }
+
+        #send-btn {
+            background-color: var(--accent-color); color: var(--bg-color);
+            border: none; padding: 0 20px; border-radius: 5px;
+            font-weight: 700; cursor: pointer; font-size: 1rem;
+            transition: background-color 0.2s ease;
+        }
+        #send-btn:hover { background-color: #9abdf5; }
+        #send-btn:disabled { background-color: #414868; cursor: not-allowed; }
+
+        .model-message .message-content p { margin: 0 0 1rem 0; }
+        .model-message .message-content p:last-child { margin-bottom: 0; }
+        .model-message .message-content ul, .model-message .message-content ol { padding-left: 20px; }
+
+        .agent-indicator {
+            font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700;
+            padding: 4px 8px; border-radius: 4px; margin-bottom: 10px; display: inline-block;
+        }
+        .agent-indicator.direct { background-color: rgba(125, 207, 255, 0.1); color: var(--direct-color); }
+        .agent-indicator.agile { background-color: rgba(122, 162, 247, 0.1); color: var(--accent-color); }
+        .agent-indicator.architect { background-color: rgba(187, 154, 247, 0.1); color: var(--architect-color); }
+        
+        /* --- NEW, UPGRADED CSS for STICKY Copy Button --- */
+
+        /* The main container for a code block, which handles scrolling */
+        .code-block-wrapper {
+            margin-top: 1rem;
+            border-radius: 6px;
+            background-color: var(--code-bg);
+            border: 1px solid var(--border-color);
+            max-height: 60vh; /* Don't let code blocks take up the whole screen */
+            overflow-y: auto;
+            position: relative; /* Establish a positioning context */
+        }
+
+        /* The header that contains the button and will stick to the top */
+        .code-block-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            justify-content: flex-end; /* Aligns button to the right */
+            padding: 8px;
+            
+            /* Glassmorphism effect */
+            background-color: rgba(30, 32, 48, 0.75);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+
+            /* A subtle line to separate header from code */
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .copy-btn {
+            background-color: #2e3450;
+            border: 1px solid var(--border-color);
+            color: var(--fg-color);
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            opacity: 0.8;
+            transition: opacity 0.2s ease-in-out, background-color 0.2s ease-in-out;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .copy-btn:hover { opacity: 1; }
+
+        .copy-btn:disabled {
+            cursor: default;
+            background-color: #4caf50;
+            color: #fff;
+            opacity: 1;
+        }
+
+        /* We no longer need margins on the <pre> tag itself, the wrapper handles it. */
+        .code-block-wrapper pre {
+            margin: 0;
+        }
+
+        /* Add padding to the code content so it doesn't start hidden under the header */
+        .code-block-wrapper pre code.hljs {
+            padding: 1rem;
+            padding-top: 1rem;
+        }
+
+        /* --- PLAN EXECUTION DISPLAY --- */
+        .plan-execution {
+            margin-top: 1rem;
+            background-color: var(--plan-bg);
+            border: 1px solid var(--plan-border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .plan-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            cursor: pointer;
+            background-color: rgba(122, 162, 247, 0.1);
+            border-bottom: 1px solid var(--plan-border);
+            transition: background-color 0.2s ease;
+        }
+
+        .plan-header:hover {
+            background-color: rgba(122, 162, 247, 0.2);
+        }
+
+        .plan-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            color: var(--accent-color);
+        }
+
+        .plan-status {
+            font-size: 0.85rem;
+            opacity: 0.8;
+        }
+
+        .plan-icon {
+            transition: transform 0.3s ease;
+        }
+
+        .plan-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .plan-content.expanded {
+            max-height: 500px;
+        }
+
+        .plan-steps {
+            padding: 0;
+            margin: 0;
+            list-style-type: none;
+        }
+
+        .plan-step {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--plan-border);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .plan-step:last-child {
+            border-bottom: none;
+        }
+
+        .step-status {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background-color: var(--plan-border);
+            flex-shrink: 0;
+            margin-top: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+
+        .step-status.pending {
+            background-color: var(--plan-border);
+        }
+
+        .step-status.executing {
+            background-color: var(--accent-color);
+            animation: pulse 1.5s infinite;
+        }
+
+        .step-status.completed {
+            background-color: var(--completed-step);
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .step-details {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            margin-top: 4px;
+        }
+
+        .current-step {
+            background-color: var(--current-step-bg);
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">Virax Jr. <span>// Agent Interface v2.2</span></div>
+        <div id="chat-history">
+            <div class="message model-message">
+                <div class="avatar">V</div>
+                <div class="message-content">
+                    <p>Hello! I am Virax Jr., your AI agent assistant. My interface now includes sticky copy-to-clipboard buttons for code blocks and a plan execution display. How can I assist you today?</p>
+                </div>
+            </div>
+        </div>
+        <div class="chat-input-area">
+            <form id="chat-form">
+                <input type="text" id="chat-input" placeholder="Message Virax Jr...." autocomplete="off" required />
+                <button type="submit" id="send-btn">Send</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const API_BASE_URL = 'http://127.0.0.1:8000/api/v1/chat';
+            const WS_BASE_URL = 'ws://127.0.0.1:8000/api/v1/chat/ws/plan-updates';
+            const chatHistoryEl = document.getElementById('chat-history');
+            const chatForm = document.getElementById('chat-form');
+            let conversationHistory = [];
+            let currentPlan = null;
+            let planExecutionElement = null;
+            let ws = null;
+
+            marked.setOptions({
+                highlight: function(code, lang) {
+                    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                    return hljs.highlight(code, { language }).value;
+                },
+                breaks: true
+            });
+            
+            // --- UPGRADED: Function to create the sticky header and copy button ---
+            const addCopyButtons = (element) => {
+                const codeBlocks = element.querySelectorAll('pre');
+                
+                codeBlocks.forEach(block => {
+                    // Prevent re-wrapping a block that has already been processed
+                    if (block.parentNode.classList.contains('code-block-wrapper')) return;
+
+                    // 1. Create the main wrapper that will scroll
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'code-block-wrapper';
+
+                    // 2. Create the sticky header
+                    const header = document.createElement('div');
+                    header.className = 'code-block-header';
+                    
+                    // 3. Create the button
+                    const copyBtn = document.createElement('button');
+                    copyBtn.className = 'copy-btn';
+
+                    const copyIconSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>`;
+                    const copiedIconSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg>`;
+                    copyBtn.innerHTML = copyIconSVG + ' Copy';
+                    
+                    // 4. Assemble the structure
+                    header.appendChild(copyBtn);
+                    block.parentNode.insertBefore(wrapper, block); // Insert wrapper before pre
+                    wrapper.appendChild(header); // Add sticky header to wrapper
+                    wrapper.appendChild(block);  // Move original pre into wrapper
+                    
+                    // 5. Add click listener to the new button
+                    copyBtn.addEventListener('click', () => {
+                        const code = block.querySelector('code').innerText;
+                        navigator.clipboard.writeText(code).then(() => {
+                            copyBtn.innerHTML = copiedIconSVG + ' Copied!';
+                            copyBtn.disabled = true;
+                            setTimeout(() => {
+                                copyBtn.innerHTML = copyIconSVG + ' Copy';
+                                copyBtn.disabled = false;
+                            }, 2000);
+                        });
+                    });
+                });
+            };
+
+            // --- NEW: Plan Execution Display Functions ---
+            const createPlanExecutionDisplay = (planText, totalSteps = null) => {
+                // Parse the plan text to extract steps
+                const steps = parsePlanSteps(planText);
+                const actualTotalSteps = totalSteps || steps.length;
+                
+                const planElement = document.createElement('div');
+                planElement.className = 'plan-execution';
+                
+                planElement.innerHTML = `
+                    <div class="plan-header">
+                        <div class="plan-title">
+                            <span class="plan-icon">▼</span>
+                            <span>Execution Plan</span>
+                        </div>
+                        <div class="plan-status">0/${actualTotalSteps} steps completed</div>
+                    </div>
+                    <div class="plan-content">
+                        <ol class="plan-steps">
+                            ${steps.map((step, index) => `
+                                <li class="plan-step">
+                                    <div class="step-status pending">${index + 1}</div>
+                                    <div class="step-content">
+                                        <div class="step-title">${step.title}</div>
+                                        ${step.details ? `<div class="step-details">${step.details}</div>` : ''}
+                                    </div>
+                                </li>
+                            `).join('')}
+                        </ol>
+                    </div>
+                `;
+                
+                // Add toggle functionality
+                const planHeader = planElement.querySelector('.plan-header');
+                const planContent = planElement.querySelector('.plan-content');
+                const planIcon = planElement.querySelector('.plan-icon');
+                
+                planHeader.addEventListener('click', () => {
+                    planContent.classList.toggle('expanded');
+                    planIcon.textContent = planContent.classList.contains('expanded') ? '▼' : '►';
+                });
+                
+                return {
+                    element: planElement,
+                    steps: steps,
+                    totalSteps: actualTotalSteps,
+                    updateStepStatus: function(stepIndex, status, details) {
+                        const stepElements = this.element.querySelectorAll('.plan-step');
+                        if (stepIndex >= 0 && stepIndex < stepElements.length) {
+                            const stepElement = stepElements[stepIndex];
+                            const statusElement = stepElement.querySelector('.step-status');
+                            
+                            // Remove all status classes
+                            statusElement.classList.remove('pending', 'executing', 'completed');
+                            // Add the new status class
+                            statusElement.classList.add(status);
+                            
+                            // Update step details if provided
+                            if (details) {
+                                let detailsElement = stepElement.querySelector('.step-details');
+                                if (!detailsElement) {
+                                    detailsElement = document.createElement('div');
+                                    detailsElement.className = 'step-details';
+                                    stepElement.querySelector('.step-content').appendChild(detailsElement);
+                                }
+                                detailsElement.textContent = details;
+                            }
+                            
+                            // Highlight current step
+                            stepElement.classList.remove('current-step');
+                            if (status === 'executing') {
+                                stepElement.classList.add('current-step');
+                            }
+                            
+                            // Update overall status
+                            const completedSteps = this.element.querySelectorAll('.step-status.completed').length;
+                            this.element.querySelector('.plan-status').textContent = 
+                                `${completedSteps}/${this.totalSteps} steps completed`;
+                        }
+                    }
+                };
+            };
+
+            
+            const parsePlanSteps = (planText) => {
+                console.log('Parsing plan:', planText);
+                
+                // Extract just the numbered list items
+                const stepRegex = /^\s*(\d+)\.\s+(.+)$/gm;
+                const steps = [];
+                let match;
+                
+                while ((match = stepRegex.exec(planText)) !== null) {
+                    const stepNumber = parseInt(match[1]);
+                    const stepContent = match[2].trim();
+                    
+                    steps.push({
+                        title: stepContent,
+                        details: ''
+                    });
+                }
+                
+                // If no numbered steps found, try alternative parsing
+                if (steps.length === 0) {
+                    // Try splitting by lines and looking for any content
+                    const lines = planText.split('\n').filter(line => {
+                        const trimmed = line.trim();
+                        return trimmed.length > 5 && // Reasonable minimum length
+                            !trimmed.startsWith('```') && // Not code blocks
+                            !trimmed.match(/^[#*-]{3,}$/); // Not separators
+                    });
+                    
+                    lines.forEach((line, index) => {
+                        const trimmed = line.replace(/^[-*]\s*/, '').trim();
+                        if (trimmed) {
+                            steps.push({
+                                title: `Step ${index + 1}: ${trimmed}`,
+                                details: ''
+                            });
+                        }
+                    });
+                }
+                
+                // If still no steps, create a default step
+                if (steps.length === 0) {
+                    steps.push({
+                        title: 'Analyze the code and create a modification plan',
+                        details: ''
+                    });
+                }
+                
+                console.log('Parsed steps:', steps);
+                return steps;
+            };
+
+            
+           const updatePlanExecution = (data) => {
+                console.log('Plan update received:', data);
+                
+                if (data.plan) {
+                    // New plan received
+                    if (planExecutionElement) {
+                        planExecutionElement.element.remove();
+                    }
+                    
+                    try {
+                        planExecutionElement = createPlanExecutionDisplay(data.plan, data.total_steps);
+                        
+                        // Add the plan to the chat history
+                        const planContainer = document.createElement('div');
+                        planContainer.appendChild(planExecutionElement.element);
+                        chatHistoryEl.appendChild(planContainer);
+                        
+                        // Auto-expand the plan
+                        const planContent = planExecutionElement.element.querySelector('.plan-content');
+                        const planIcon = planExecutionElement.element.querySelector('.plan-icon');
+                        planContent.classList.add('expanded');
+                        planIcon.textContent = '▼';
+                        
+                        chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+                    } catch (error) {
+                        console.error('Error creating plan display:', error);
+                    }
+                }
+                
+                if (data.current_step !== undefined && planExecutionElement) {
+                    // Update current step status
+                    const status = data.status || 'executing';
+                    const thoughts = data.thoughts || '';
+                    
+                    try {
+                        // Mark previous steps as completed
+                        for (let i = 0; i < data.current_step; i++) {
+                            planExecutionElement.updateStepStatus(i, 'completed', '');
+                        }
+                        
+                        // Update current step
+                        planExecutionElement.updateStepStatus(data.current_step, status, thoughts);
+                    } catch (error) {
+                        console.error('Error updating step status:', error);
+                    }
+                }
+            };
+
+            const connectWebSocket = () => {
+                try {
+                    ws = new WebSocket(WS_BASE_URL);
+                    
+                    ws.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            updatePlanExecution(data);
+                        } catch (error) {
+                            console.error('Error parsing WebSocket message:', error, event.data);
+                        }
+                    };
+                    
+                    ws.onopen = () => {
+                        console.log('WebSocket connection established');
+                    };
+                    
+                    ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                    };
+                    
+                    ws.onclose = () => {
+                        console.log('WebSocket connection closed');
+                    };
+                    
+                    // Add a timeout to close the connection if no plan updates are received
+                    setTimeout(() => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.close();
+                        }
+                    }, 30000); // Close after 30 seconds if no updates
+                } catch (error) {
+                    console.error('Error creating WebSocket:', error);
+                }
+            };
+
+
+            const createIndicatorHTML = (metadata) => {
+                 if (!metadata || !metadata.mode || metadata.mode === 'CONVERSATIONAL') return '';
+                let icon = '', text = '', className = '';
+                switch (metadata.mode) {
+                    case 'MODE_1_DIRECT_DISPATCH': icon = '⚡️'; text = `Direct Dispatch`; className = 'direct'; break;
+                    case 'MODE_2_AGILE_AGENT': icon = '🧠'; text = 'Agile Agent'; className = 'agile'; break;
+                    case 'MODE_3_ARCHITECT_ENGINE': icon = '🏗️'; text = 'Architect Engine'; className = 'architect'; break;
+                    default: return '';
+                }
+                return `<div class="agent-indicator ${className}">${icon} ${text}</div>`;
+            };
+
+            const appendMessage = (sender, text, metadata = null) => {
+                document.querySelector('.typing-indicator')?.remove();
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('message', `${sender}-message`);
+                const avatarInitial = sender === 'user' ? 'You' : 'V';
+                const indicatorHTML = createIndicatorHTML(metadata);
+                const messageContent = sender === 'model' ? marked.parse(text) : `<p>${text}</p>`;
+                messageDiv.innerHTML = `<div class="avatar">${avatarInitial.charAt(0)}</div><div class="message-content">${indicatorHTML}${messageContent}</div>`;
+                chatHistoryEl.appendChild(messageDiv);
+                if (sender === 'model') { addCopyButtons(messageDiv); }
+                chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+            };
+            
+            const setTypingIndicator = (isTyping) => {
+                let indicator = document.querySelector('.typing-indicator');
+                if (isTyping && !indicator) {
+                    indicator = document.createElement('div');
+                    indicator.className = 'typing-indicator';
+                    indicator.textContent = 'Virax is thinking...';
+                    chatHistoryEl.appendChild(indicator);
+                    chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+                } else if (!isTyping && indicator) {
+                    indicator.remove();
+                }
+            };
+
+            const handleFormSubmit = async (event) => {
+                event.preventDefault();
+                const chatInput = document.getElementById('chat-input');
+                const sendBtn = document.getElementById('send-btn');
+                const userMessage = chatInput.value.trim();
+                if (!userMessage) return;
+
+                appendMessage('user', userMessage);
+                conversationHistory.push({ role: 'user', parts: [userMessage] });
+                chatInput.value = '';
+                sendBtn.disabled = true;
+                setTypingIndicator(true);
+
+                // Connect to WebSocket for plan updates
+                connectWebSocket();
+
+                try {
+                    const response = await fetch(API_BASE_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ history: conversationHistory })
+                    });
+                    
+                    if (!response.ok) throw new Error(`Network response was not ok: ${response.statusText}`);
+                    
+                    const aiResponse = await response.json();
+                    conversationHistory.push(aiResponse);
+                    appendMessage('model', aiResponse.parts[0], aiResponse.metadata);
+                    
+                    // Close WebSocket after receiving final response
+                    if (ws) {
+                        ws.close();
+                    }
+                } catch (error) {
+                    console.error("Chat API failed:", error);
+                    appendMessage('model', `I'm sorry, I encountered an error. Please try again.\n\n**Error:** \`${error.message}\``);
+                } finally {
+                    sendBtn.disabled = false;
+                    setTypingIndicator(false);
+                    chatInput.focus();
+                }
+            };
+
+            chatForm.addEventListener('submit', handleFormSubmit);
+        });
+    </script>
+</body>
+</html>

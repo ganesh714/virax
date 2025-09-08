@@ -1,0 +1,12 @@
+# Environment variables and secrets
+.env
+token.json
+credentials.json
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Virtual environment folder (if you have one)
+venv/
+.venv/

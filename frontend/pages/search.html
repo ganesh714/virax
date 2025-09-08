@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virax Jr. - Web Search</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap');
+        :root { --bg-color: #1a1b26; --fg-color: #c0caf5; --card-color: #24283b; --border-color: #414868; --accent-color: #9ece6a; --link-color: #7aa2f7;}
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--fg-color); margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { width: 100%; max-width: 800px; height: 80vh; padding: 2rem; display: flex; flex-direction: column; }
+        #search-form { display: flex; gap: 10px; margin-bottom: 2rem; }
+        #search-input {
+            flex-grow: 1; background-color: var(--card-color); color: var(--fg-color);
+            border: 1px solid var(--border-color); border-radius: 5px; padding: 12px 15px; font-size: 1rem;
+        }
+        #search-btn {
+            background-color: var(--accent-color); color: var(--card-color); border: none;
+            padding: 0 20px; border-radius: 5px; font-weight: 600; cursor: pointer; font-size: 1rem;
+        }
+        #results-container { flex-grow: 1; overflow-y: auto; }
+        .result-item {
+            background-color: var(--card-color); padding: 1rem; border-radius: 5px;
+            margin-bottom: 1rem; border: 1px solid var(--border-color);
+        }
+        .result-item h3 { margin: 0 0 0.5rem 0; }
+        .result-item h3 a { color: var(--link-color); text-decoration: none; }
+        .result-item p { margin: 0 0 0.5rem 0; opacity: 0.8; font-size: 0.9rem; }
+        .result-item .url { font-family: 'Roboto Mono', monospace; font-size: 0.8rem; opacity: 0.6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <form id="search-form">
+            <input type="text" id="search-input" placeholder="Ask the web..." required />
+            <button type="submit" id="search-btn">Search</button>
+        </form>
+        <div id="results-container"></div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const API_BASE_URL = 'http://127.0.0.1:8000/api/v1/search';
+            const searchForm = document.getElementById('search-form');
+            const searchInput = document.getElementById('search-input');
+            const resultsContainer = document.getElementById('results-container');
+
+            const renderResults = (results) => {
+                resultsContainer.innerHTML = '';
+                if (!results || results.length === 0) {
+                    resultsContainer.innerHTML = '<p>No results found.</p>';
+                    return;
+                }
+                results.forEach(result => {
+                    const item = document.createElement('div');
+                    item.className = 'result-item';
+                    item.innerHTML = `
+                        <h3><a href="${result.url}" target="_blank">${result.title}</a></h3>
+                        <p>${result.content}</p>
+                        <div class="url">${result.url}</div>
+                    `;
+                    resultsContainer.appendChild(item);
+                });
+            };
+
+            searchForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const query = searchInput.value.trim();
+                if (!query) return;
+
+                resultsContainer.innerHTML = '<p>Searching...</p>';
+
+                try {
+                    const response = await fetch(API_BASE_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: query })
+                    });
+                    if (!response.ok) throw new Error('Network response was not ok.');
+                    
+                    const data = await response.json();
+                    renderResults(data.results);
+
+                } catch (error) {
+                    console.error("Search failed:", error);
+                    resultsContainer.innerHTML = '<p>Sorry, the search could not be completed.</p>';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

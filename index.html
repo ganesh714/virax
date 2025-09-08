@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virax Jr. - Home</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap');
+        :root { --bg-color: #1a1b26; --fg-color: #c0caf5; --card-color: #24283b; --border-color: #414868; --accent-color: #7aa2f7; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--fg-color); margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; }
+        h1 { font-family: 'Roboto Mono', monospace; color: var(--accent-color); font-size: 2.5rem; margin-bottom: 2rem; }
+        .nav-container { display: flex; gap: 2rem; }
+        .nav-card {
+            background-color: var(--card-color); border: 1px solid var(--border-color); border-radius: 8px;
+            padding: 2rem 3rem; text-decoration: none; color: var(--fg-color); text-align: center;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .nav-card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3); }
+        .nav-card h2 { margin-top: 0; font-size: 1.5rem; font-weight: 600; }
+        .nav-card p { opacity: 0.7; }
+    </style>
+</head>
+<body>
+    <h1>Virax Jr.</h1>
+    <div class="nav-container">
+        <a href="./frontend/pages/tasks.html" class="nav-card">
+            <h2>✅ Tasks</h2>
+            <p>Manage Google Tasks</p>
+        </a>
+        <a href="./frontend/pages/github.html" class="nav-card">
+            <h2>💻 GitHub</h2>
+            <p>View Repos & Commits</p>
+        </a>
+        <a href="./frontend/pages/search.html" class="nav-card">
+            <h2>🌐 Web Search</h2>
+            <p>Query the Internet</p>
+        </a>
+        <a href="./frontend/pages/chatbot.html" class="nav-card">
+            <h2>💬 Chatbot</h2>
+            <p>Converse with the Agent</p>
+        </a>
+    </div>
+</body>
+</html>
