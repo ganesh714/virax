@@ -13,6 +13,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 import json
 import uuid
 import inspect
+from datetime import datetime # 1. IMPORT DATETIME
 
 # --- Pydantic Models & Router (Unchanged) ---
 class ChatMessage(BaseModel):
@@ -128,12 +129,14 @@ TOOLS_AVAILABLE = {
 COGNITIVE_ROUTER_PROMPT = f"""
 You are Virax Jr., an AI assistant with a modular cognitive architecture. Your primary function is to analyze a user's request and select the most appropriate execution mode based on its complexity.
 
+--- CONTEXT ---
+Current Date: {datetime.now().strftime("%B %d, %Y")}
+
 --- COGNITIVE MODES ---
 
 1.  **MODE_1_DIRECT_DISPATCH:**
     - **Complexity:** Trivial. A single, direct command.
-    - **Use Case:** 
-       - "What are my repos?", 
+    - **Use Case:** - "What are my repos?", 
        - "Add 'buy milk' to my shopping list", 
        - "Read the README.md in 'virax/main' repo.",
        - "Fetch index.html from user/repo",
@@ -513,7 +516,8 @@ Return ONLY the complete README.md markdown code inside a single markdown block.
         elif tool_name == "web_search":
             query = args.get('query')
             if not query: return "Error: Missing 'query' parameter for web_search."
-            response = await http_client.post("/search", json={"query": query})
+            # FIXED: Added a trailing slash to the URL
+            response = await http_client.post("/search/", json={"query": query})
             
         else: 
             return f"Error: Tool '{tool_name}' is defined but not implemented."
@@ -554,67 +558,69 @@ async def handle_chat_message(chat_data: ChatHistory):
         thought = decision.get("Thought", "I need to start working on the goal.")
         action_str = decision.get("Action", "Finish(answer='I'm not sure how to proceed.')")
         current_plan = None
+        print("\n" + "="*50 + f"\n| 🏃‍♂️ ENTERING AGENT MODE: {mode_used}\n| GOAL: {goal}\n" + "="*50)
 
-    print("\n" + "="*50 + f"\n| 🏃‍♂️ ENTERING AGENT MODE: {mode_used}\n| GOAL: {goal}\n" + "="*50)
 
+        # --- Stuck loop detection variables ---
+        recent_action_obs = []  # List of (action, observation) tuples
+        stuck_threshold = 3     # Number of repeats to consider stuck
 
-    # --- Stuck loop detection variables ---
-    recent_action_obs = []  # List of (action, observation) tuples
-    stuck_threshold = 3     # Number of repeats to consider stuck
+        for i in range(max_iterations):
+            print(f"\n--- STEP {i+1} ---")
+            agent_scratchpad += f"Thought: {thought}\n"
+            print(f"🤔 Thought: {thought}")
+            print(f"🎬 Action: {action_str}")
 
-    for i in range(max_iterations):
-        print(f"\n--- STEP {i+1} ---")
-        agent_scratchpad += f"Thought: {thought}\n"
-        print(f"🤔 Thought: {thought}")
-        print(f"🎬 Action: {action_str}")
+            cleaned_action = action_str.strip()
 
-        cleaned_action = action_str.strip()
+            if cleaned_action.startswith("Finish("):
+                final_response_text = cleaned_action[len("Finish("):-1].strip().strip("'\"")
+                print("\n" + "="*50 + "\n| ✅ AGENT FINISHED\n" + "="*50)
+                break
 
-        if cleaned_action.startswith("Finish("):
-            final_response_text = cleaned_action[len("Finish("):-1].strip().strip("'\"")
-            print("\n" + "="*50 + "\n| ✅ AGENT FINISHED\n" + "="*50)
-            break
+            observation = await execute_tool(cleaned_action, chat_data, goal, session_id)
 
-        observation = await execute_tool(cleaned_action, chat_data, goal, session_id)
+            # --- Stuck loop detection: check last N (action, observation) pairs ---
+            recent_action_obs.append((cleaned_action, str(observation).strip()))
+            if len(recent_action_obs) > stuck_threshold:
+                recent_action_obs.pop(0)
+            # If all last N pairs are identical, break as stuck
+            if len(recent_action_obs) == stuck_threshold and all(pair == recent_action_obs[0] for pair in recent_action_obs):
+                print("\n[AGENT LOOP] Detected stuck loop (repeated action+observation). Breaking early.")
+                break
 
-        # --- Stuck loop detection: check last N (action, observation) pairs ---
-        recent_action_obs.append((cleaned_action, str(observation).strip()))
-        if len(recent_action_obs) > stuck_threshold:
-            recent_action_obs.pop(0)
-        # If all last N pairs are identical, break as stuck
-        if len(recent_action_obs) == stuck_threshold and all(pair == recent_action_obs[0] for pair in recent_action_obs):
-            print("\n[AGENT LOOP] Detected stuck loop (repeated action+observation). Breaking early.")
-            break
+            # --- Extract README.md markdown code if present in observation ---
+            if "```markdown" in observation:
+                md_match = re.search(r"```markdown\s*(.*?)```", observation, re.DOTALL)
+                if md_match:
+                    generated_readme_content = md_match.group(1).strip()
 
-        # --- Extract README.md markdown code if present in observation ---
-        if "```markdown" in observation:
-            md_match = re.search(r"```markdown\s*(.*?)```", observation, re.DOTALL)
-            if md_match:
-                generated_readme_content = md_match.group(1).strip()
+            if cleaned_action == "create_plan()" and "Session ID:" in observation:
+                session_match = re.search(r"Session ID: ([\w-]+)", observation)
+                if session_match:
+                    session_id = session_match.group(1)
+                    print(f"🔑 New Code Session Started: {session_id}")
 
-        if cleaned_action == "create_plan()" and "Session ID:" in observation:
-            session_match = re.search(r"Session ID: ([\w-]+)", observation)
-            if session_match:
-                session_id = session_match.group(1)
-                print(f"🔑 New Code Session Started: {session_id}")
+            if cleaned_action == "create_plan()" and "I have analyzed the provided code" in observation:
+                plan_match = re.search(r"```plan\s*(.*?)```", observation, re.DOTALL)
+                if plan_match:
+                    current_plan = plan_match.group(1).strip()
+                    plan_lines = current_plan.split('\n')
+                    total_steps = len([line for line in plan_lines if re.match(r'^\d+\.', line.strip())])
+                    await plan_manager.send_plan_update({
+                        "plan": current_plan, "current_step": 0, "total_steps": total_steps, "status": "plan_created"
+                    })
 
-        if cleaned_action == "create_plan()" and "I have analyzed the provided code" in observation:
-            plan_match = re.search(r"```plan\s*(.*?)```", observation, re.DOTALL)
-            if plan_match:
-                current_plan = plan_match.group(1).strip()
-                plan_lines = current_plan.split('\n')
-                total_steps = len([line for line in plan_lines if re.match(r'^\d+\.', line.strip())])
-                await plan_manager.send_plan_update({
-                    "plan": current_plan, "current_step": 0, "total_steps": total_steps, "status": "plan_created"
-                })
+            char_limit = 250
+            print(f"👀 Observation: {observation[:char_limit]}{'...' if len(observation) > char_limit else ''}")
 
-        char_limit = 250
-        print(f"👀 Observation: {observation[:char_limit]}{'...' if len(observation) > char_limit else ''}")
+            agent_scratchpad += f"Action: {cleaned_action}\nObservation: {observation}\n"
 
-        agent_scratchpad += f"Action: {cleaned_action}\nObservation: {observation}\n"
-
-        react_prompt_template = """Your GOAL is: '{goal}'. Previous steps are on the scratchpad. Decide the next thought and action.
+            react_prompt_template = """Your GOAL is: '{goal}'. Previous steps are on the scratchpad. Decide the next thought and action.
 If a plan exists, execute the next step. If all steps are done, use Finish().
+
+--- CONTEXT ---
+Current Date: {current_date}
 
 --- ACTION FORMAT ---
 You MUST format your action as a single-line Python function call.
@@ -633,24 +639,23 @@ When your goal is to create or modify a file on GitHub, you MUST first verify if
 Tools: {tools}
 Thought:"""
 
-        react_prompt = react_prompt_template.format(goal=goal, scratchpad=agent_scratchpad, tools=json.dumps(TOOLS_AVAILABLE, indent=2))
+            react_prompt = react_prompt_template.format(goal=goal, scratchpad=agent_scratchpad, tools=json.dumps(TOOLS_AVAILABLE, indent=2), current_date=datetime.now().strftime("%B %d, %Y"))
 
-        llm_response = agent_model.generate_content(react_prompt)
-        parsed_action = parse_react_action("Thought: " + llm_response.text)
-        thought, action_str = parsed_action["thought"], parsed_action["action"]
+            llm_response = agent_model.generate_content(react_prompt)
+            parsed_action = parse_react_action("Thought: " + llm_response.text)
+            thought, action_str = parsed_action["thought"], parsed_action["action"]
 
 
-    # Always show the generated README.md if it was produced, even if the commit fails
-    readme_found = False
-    commit_status = None
-    if 'commit_github_file' in agent_scratchpad:
-        if 'Error executing action' in agent_scratchpad or '403' in agent_scratchpad or '500' in agent_scratchpad:
-            commit_status = "❌ Commit to GitHub failed. You may not have permission, or the API returned an error."
-        else:
-            commit_status = "✅ README.md was successfully committed to the repository."
+        # Always show the generated README.md if it was produced, even if the commit fails
+        readme_found = False
+        commit_status = None
+        if 'commit_github_file' in agent_scratchpad:
+            if 'Error executing action' in agent_scratchpad or '403' in agent_scratchpad or '500' in agent_scratchpad:
+                commit_status = "❌ Commit to GitHub failed. You may not have permission, or the API returned an error."
+            else:
+                commit_status = "✅ README.md was successfully committed to the repository."
 
-    # --- Always use LLM for final synthesis if agent mode was used ---
-    if mode_used in ["MODE_2_AGILE_AGENT", "MODE_3_ARCHITECT_ENGINE"]:
+        # --- Always use LLM for final synthesis if agent mode was used ---
         synthesis_model = get_model_for_task("standard")
         # If markdown was generated, include it in the scratchpad context
         if generated_readme_content:
@@ -681,7 +686,7 @@ Thought:"""
         except Exception:
             pass
 
-    if not readme_found and mode_used == "MODE_1_DIRECT_DISPATCH":
+    elif mode_used == "MODE_1_DIRECT_DISPATCH":
         print(f"\n| ⚡️ EXECUTING DIRECT DISPATCH: {decision['TOOL']}")
         params_json = json.dumps(decision['PARAMS']) if isinstance(decision['PARAMS'], dict) else str(decision['PARAMS'])
         action_result = await execute_tool(f"{decision['TOOL']}({params_json})", chat_data, goal)
@@ -700,7 +705,7 @@ Thought:"""
                 final_response_text += f"\n\nHere is the content of `{decision['PARAMS']['file_path']}`:\n```html\n{file_content}\n```"
             except Exception as e:
                 final_response_text += "\n\nError: Could not parse file content from the response."
-    elif not readme_found and mode_used == "CONVERSATIONAL":
+    elif mode_used == "CONVERSATIONAL":
         conversational_model = get_model_for_task("standard")
         chat = conversational_model.start_chat(history=[m.model_dump() for m in chat_data.history[:-1]])
         response = chat.send_message(user_message)
