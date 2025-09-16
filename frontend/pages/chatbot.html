@@ -640,7 +640,12 @@
                 const messageDiv = document.createElement('div');
                 messageDiv.classList.add('message', `${sender}-message`);
                 const avatarInitial = sender === 'user' ? 'You' : 'V';
-                const indicatorHTML = createIndicatorHTML(metadata);
+
+                let indicatorHTML = '';
+                if (metadata && metadata.mode) {
+                    indicatorHTML = createIndicatorHTML(metadata);
+                }
+                
                 const messageContent = sender === 'model' ? marked.parse(text) : `<p>${text}</p>`;
                 messageDiv.innerHTML = `<div class="avatar">${avatarInitial.charAt(0)}</div><div class="message-content">${indicatorHTML}${messageContent}</div>`;
                 chatHistoryEl.appendChild(messageDiv);
@@ -686,9 +691,21 @@
                     
                     if (!response.ok) throw new Error(`Network response was not ok: ${response.statusText}`);
                     
-                    const aiResponse = await response.json();
-                    conversationHistory.push(aiResponse);
-                    appendMessage('model', aiResponse.parts[0], aiResponse.metadata);
+                    const data = await response.json();
+                    
+                    if (data && data.response) {
+                        // Add the AI response to conversation history
+                        conversationHistory.push({ 
+                            role: 'assistant', 
+                            parts: [data.response],
+                            metadata: data.metadata || null
+                        });
+                        
+                        // Display the AI response
+                        appendMessage('model', data.response, data.metadata || null);
+                    } else {
+                        throw new Error('Invalid response format from server');
+                    }
                     
                     // Close WebSocket after receiving final response
                     if (ws) {

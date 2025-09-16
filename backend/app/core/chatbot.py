@@ -263,30 +263,55 @@ def parse_react_action(llm_output: str) -> Dict:
     action_str = action_match.group(1).strip() if action_match else ""
     return {"thought": thought, "action": action_str}
 
-# --- MODIFIED: Function to get the appropriate model based on the .env file ---
+# --- MODIFIED: Function to get the appropriate model with round-robin fallback ---
 def get_model_for_task(task_type: str):
-    """Selects the Gemini model and API key based on the task type."""
-    if task_type == "max_reasoning": # For very high-level reasoning or large coding tasks
-        api_key = os.getenv("GEMINI_API_KEY_PRIMARY")
-        model_name = os.getenv("GEMINI_MODEL_MAX", "gemini-2.5-pro")
-    elif task_type == "high_reasoning": # For multi-step reasoning in complex agent loops
-        api_key = os.getenv("GEMINI_API_KEY_PRIMARY")
-        model_name = os.getenv("GEMINI_MODEL_HIGH", "gemini-2.5-flash")
-    elif task_type == "planning": # For creating plans as per user request
-        api_key = os.getenv("GEMINI_API_KEY_PRIMARY")
-        model_name = os.getenv("GEMINI_MODEL_MEDIUM", "gemini-2.5-flash-lite")
-    elif task_type == "standard": # For standard agentic tasks, synthesis, and normal conversation
-        api_key = os.getenv("GEMINI_API_KEY_SECONDARY")
-        model_name = os.getenv("GEMINI_MODEL_STANDARD", "gemini-2.0-flash")
-    else: # "lite" for routing, simple classifications, or default
-        api_key = os.getenv("GEMINI_API_KEY_SECONDARY")
-        model_name = os.getenv("GEMINI_MODEL_LITE", "gemini-2.0-flash-lite")
-
-    if not api_key:
-        raise HTTPException(status_code=500, detail=f"GEMINI_API_KEY for task type '{task_type}' not found.")
+    """Selects the Gemini model and API key based on the task type with fallback for rate limits."""
+    # Define the preferred API keys for each task type
+    task_preferences = {
+        "max_reasoning": ["GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3"],
+        "high_reasoning": ["GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3"],
+        "planning": ["GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3"],
+        "standard": ["GEMINI_API_KEY_2", "GEMINI_API_KEY_1", "GEMINI_API_KEY_3"],
+        "lite": ["GEMINI_API_KEY_3", "GEMINI_API_KEY_2", "GEMINI_API_KEY_1"]
+    }
     
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
+    # Define model names for each task type
+    model_names = {
+        "max_reasoning": os.getenv("GEMINI_MODEL_MAX", "gemini-2.5-pro"),
+        "high_reasoning": os.getenv("GEMINI_MODEL_HIGH", "gemini-2.5-flash"),
+        "planning": os.getenv("GEMINI_MODEL_MEDIUM", "gemini-2.5-flash-lite"),
+        "standard": os.getenv("GEMINI_MODEL_STANDARD", "gemini-2.0-flash"),
+        "lite": os.getenv("GEMINI_MODEL_LITE", "gemini-2.0-flash-lite")
+    }
+    
+    # Get the preferred order of API keys for this task type
+    preferred_keys = task_preferences.get(task_type, ["GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3"])
+    
+    # Try each API key in order until we find one that works
+    for api_key_env in preferred_keys:
+        api_key = os.getenv(api_key_env)
+        if api_key:
+            try:
+                genai.configure(api_key=api_key)
+                model_name = model_names.get(task_type, "gemini-2.0-flash")
+                model = genai.GenerativeModel(model_name)
+                
+                # Test the API key with a simple request
+                model.generate_content("Test connection")
+                print(f"✅ Using API key: {api_key_env} for task: {task_type}")
+                return model
+            except Exception as e:
+                # If we get a rate limit error or other API error, try the next key
+                error_msg = str(e).lower()
+                if "quota" in error_msg or "rate" in error_msg or "limit" in error_msg or "429" in error_msg:
+                    print(f"⚠️  Rate limit exceeded for {api_key_env}, trying next key...")
+                    continue
+                else:
+                    # For other errors, re-raise the exception
+                    raise HTTPException(status_code=500, detail=f"Error with API key {api_key_env}: {str(e)}")
+    
+    # If we get here, none of the API keys worked
+    raise HTTPException(status_code=500, detail=f"No working API key found for task type '{task_type}'")
 
 
 # --- UPDATED execute_tool function ---
@@ -504,6 +529,10 @@ Return ONLY the complete README.md markdown code inside a single markdown block.
             if not all([owner, repo_name, file_path, new_content, commit_message]):
                 return "Error: Missing parameters for commit_github_file."
             
+            # FIX: Unescape newlines in the content
+            if isinstance(new_content, str):
+                new_content = new_content.replace('\\n', '\n')
+            
             update_payload = {
                 "new_content": new_content,
                 "commit_message": commit_message
@@ -677,57 +706,55 @@ Thought:"""
         )
         final_response = synthesis_model.generate_content(synthesis_prompt)
         final_response_text = final_response.text
-        # Ensure human-readable output if LLM returns JSON
-        try:
-            # Try to parse as JSON
-            parsed = json.loads(final_response_text)
-            if isinstance(parsed, dict) and 'answer' in parsed:
-                final_response_text = parsed['answer']
-        except Exception:
-            pass
+
+        # --- Add commit status to the final response if applicable ---
+        if commit_status:
+            final_response_text = f"{commit_status}\n\n{final_response_text}"
 
     elif mode_used == "MODE_1_DIRECT_DISPATCH":
-        print(f"\n| ⚡️ EXECUTING DIRECT DISPATCH: {decision['TOOL']}")
-        params_json = json.dumps(decision['PARAMS']) if isinstance(decision['PARAMS'], dict) else str(decision['PARAMS'])
-        action_result = await execute_tool(f"{decision['TOOL']}({params_json})", chat_data, goal)
-        synthesis_model = get_model_for_task("standard")
-        synthesis_prompt = f"The user asked: '{user_message}'. The tool '{decision['TOOL']}' returned: {action_result}\n\nFormulate a natural language response based on this data."
-        final_response = synthesis_model.generate_content(synthesis_prompt)
-        final_response_text = final_response.text
+        tool_name = decision.get("TOOL")
+        params = decision.get("PARAMS", {})
+        if not tool_name:
+            final_response_text = "Error: Router selected MODE_1_DIRECT_DISPATCH but did not specify a TOOL."
+        else:
+            action_str = f"{tool_name}({json.dumps(params)})"
+            observation = await execute_tool(action_str, chat_data, goal, session_id)
+            final_response_text = observation
 
-        if decision['TOOL'] == "get_github_file":
-            try:
-                result_json = json.loads(action_result)
-                file_content = result_json.get("content") or result_json.get("file_content") or ""
-                import base64
-                if result_json.get("encoding") == "base64":
-                    file_content = base64.b64decode(file_content).decode("utf-8")
-                final_response_text += f"\n\nHere is the content of `{decision['PARAMS']['file_path']}`:\n```html\n{file_content}\n```"
-            except Exception as e:
-                final_response_text += "\n\nError: Could not parse file content from the response."
-    elif mode_used == "CONVERSATIONAL":
-        conversational_model = get_model_for_task("standard")
-        chat = conversational_model.start_chat(history=[m.model_dump() for m in chat_data.history[:-1]])
-        response = chat.send_message(user_message)
-        final_response_text = response.text
+    else: # CONVERSATIONAL MODE
+        print(f"\n| 💬 CONVERSATIONAL MODE")
+        # --- FIXED: Use proper conversational prompt ---
+        conversation_model = get_model_for_task("standard")
+        conversation_prompt = f"""You are Virax Jr., a helpful AI assistant. Respond naturally to the user's message. Keep it concise and friendly.
 
-    # --- FINAL SYNTHESIS & CLEANUP ---
-    if session_id and code_manager.get_code(session_id):
-        final_code = code_manager.get_code(session_id)
-        if 'Here is the complete modified code' not in final_response_text:
-            final_response_text += f"\n\nHere is the complete modified code:\n```html\n{final_code}\n```"
+User: {user_message}
+Virax Jr.:"""
+        conv_response = conversation_model.generate_content(conversation_prompt)
+        final_response_text = conv_response.text
+
+    # Clean up the session if it exists
+    if session_id:
         code_manager.cleanup_session(session_id)
-        print(f"🧹 Session {session_id} cleaned up.")
 
-    print(f"\n| 💬 FINAL RESPONSE TO USER:\n{final_response_text[:1000]}...")
-    return {"role": "model", "parts": [final_response_text], "metadata": {"mode": mode_used}}
+    print(f"\n| 📤 FINAL RESPONSE:\n{final_response_text}")
+    return {"response": final_response_text}
 
-# WebSocket endpoint for plan updates
-@router.websocket("/ws/plan-updates")
+# --- WebSocket Endpoint for Plan Updates ---
+@router.websocket("/plan-updates")
 async def websocket_endpoint(websocket: WebSocket):
     await plan_manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text() # Keep connection open
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        plan_manager.disconnect(websocket)
+
+# --- WebSocket Endpoint for Plan Updates (Unchanged) ---
+@router.websocket("/ws/plan")
+async def websocket_endpoint(websocket: WebSocket):
+    await plan_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
     except WebSocketDisconnect:
         plan_manager.disconnect(websocket)
